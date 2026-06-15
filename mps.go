@@ -4,6 +4,7 @@
 package gorgonia
 
 import (
+	"errors"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -45,10 +46,49 @@ type ExternMetadata struct {
 	available     bool
 	deviceName    string
 	memories      map[uintptr]mpsHostMemory
+	values        map[*MPSFloat32Value]struct{}
 }
 
 type mpsHostMemory struct {
 	data []byte
+}
+
+// MPSFloat32Value owns a Metal buffer for a float32 tensor value.
+// It is the first step toward GPU-resident values; current ops still read back
+// CPU tensors after execution, but this type gives the backend explicit buffer
+// lifetime management independent of host tensor lifetimes.
+type MPSFloat32Value struct {
+	buffer *mpsbridge.Float32Buffer
+	shape  tensor.Shape
+	closed bool
+}
+
+// Shape returns the tensor shape represented by this MPS value.
+func (v *MPSFloat32Value) Shape() tensor.Shape {
+	if v == nil || v.shape == nil {
+		return nil
+	}
+	return v.shape.Clone()
+}
+
+// Float32s copies this MPS value back to host memory.
+func (v *MPSFloat32Value) Float32s() ([]float32, error) {
+	if v == nil || v.closed || v.buffer == nil {
+		return nil, errors.New("MPS float32 value is closed")
+	}
+	return v.buffer.Float32s()
+}
+
+// Close releases this MPS value's Metal buffer.
+func (v *MPSFloat32Value) Close() {
+	if v == nil || v.closed {
+		return
+	}
+	v.closed = true
+	if v.buffer != nil {
+		v.buffer.Close()
+		v.buffer = nil
+	}
 }
 
 func (m mpsHostMemory) Uintptr() uintptr { return uintptr(unsafe.Pointer(&m.data[0])) }
@@ -77,6 +117,7 @@ func (m *ExternMetadata) init() error {
 	m.available = mpsbridge.Available()
 	m.deviceName = mpsbridge.DeviceName()
 	m.memories = make(map[uintptr]mpsHostMemory)
+	m.values = make(map[*MPSFloat32Value]struct{})
 	m.initialized = true
 	return nil
 }
@@ -86,8 +127,84 @@ func (m *ExternMetadata) initFail() { m.cleanup() }
 func (m *ExternMetadata) cleanup() {
 	m.Lock()
 	defer m.Unlock()
+	for value := range m.values {
+		value.Close()
+	}
+	m.values = nil
+	m.memories = nil
 	m.initialized = false
 }
+
+// CacheFloat32Value copies a float32 dense tensor into a Metal buffer and tracks its lifetime.
+func (m *ExternMetadata) CacheFloat32Value(value *tensor.Dense) (*MPSFloat32Value, error) {
+	if value == nil {
+		return nil, errors.New("cannot cache nil tensor as MPS value")
+	}
+	if value.Dtype() != tensor.Float32 {
+		return nil, errors.New("MPS value cache supports float32 tensors only")
+	}
+	data, ok := value.Data().([]float32)
+	if !ok {
+		return nil, errors.New("MPS value cache expected []float32 backing")
+	}
+	buffer, err := mpsbridge.NewFloat32Buffer(data)
+	if err != nil {
+		return nil, err
+	}
+	mpsValue := &MPSFloat32Value{buffer: buffer, shape: value.Shape().Clone()}
+	m.Lock()
+	if m.values == nil {
+		m.values = make(map[*MPSFloat32Value]struct{})
+	}
+	m.values[mpsValue] = struct{}{}
+	m.Unlock()
+	return mpsValue, nil
+}
+
+// ReleaseMPSValue releases a cached MPS value and removes it from the registry.
+func (m *ExternMetadata) ReleaseMPSValue(value *MPSFloat32Value) {
+	if value == nil {
+		return
+	}
+	m.Lock()
+	delete(m.values, value)
+	m.Unlock()
+	value.Close()
+}
+
+// MPSValueCount returns the number of tracked MPS values.
+func (m *ExternMetadata) MPSValueCount() int {
+	m.Lock()
+	defer m.Unlock()
+	return len(m.values)
+}
+
+func cacheMPSFloat32Value(extern External, value *tensor.Dense) {
+	metadata := mpsMetadataFromExternal(extern)
+	if metadata == nil || value == nil || value.Dtype() != tensor.Float32 {
+		return
+	}
+	_, _ = metadata.CacheFloat32Value(value)
+}
+
+type mpsMetadataProvider interface {
+	MPSMetadata() *ExternMetadata
+}
+
+func mpsMetadataFromExternal(extern External) *ExternMetadata {
+	switch e := extern.(type) {
+	case nil:
+		return nil
+	case *ExternMetadata:
+		return e
+	case mpsMetadataProvider:
+		return e.MPSMetadata()
+	default:
+		return nil
+	}
+}
+
+func (m *ExternMetadata) MPSMetadata() *ExternMetadata { return m }
 
 // HasFunc reports whether an external function has been loaded.
 func (m ExternMetadata) HasFunc(name string) bool { return false }
@@ -180,7 +297,15 @@ func (m *ExternMetadata) Transfer(toDev, fromDev Device, v Value, synchronous bo
 }
 
 // Reset clears external allocator state.
-func (m *ExternMetadata) Reset() { m.memories = make(map[uintptr]mpsHostMemory) }
+func (m *ExternMetadata) Reset() {
+	m.Lock()
+	defer m.Unlock()
+	for value := range m.values {
+		value.Close()
+	}
+	m.memories = make(map[uintptr]mpsHostMemory)
+	m.values = make(map[*MPSFloat32Value]struct{})
+}
 
 // Cleanup cleans up ancillary allocations made during external execution.
 func (m *ExternMetadata) Cleanup() { m.cleanup() }

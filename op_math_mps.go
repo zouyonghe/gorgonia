@@ -149,6 +149,8 @@ func (op linAlgBinOp) MPSDo(extern External, dev Device, prealloc Value, inputs 
 	if !ok {
 		return nil, errors.Errorf("MPS matmul expected right []float32 backing, got %T", b.Data())
 	}
+	cacheMPSFloat32Value(extern, a)
+	cacheMPSFloat32Value(extern, b)
 	out, err := mpsbridge.MatMulFloat32(left, right, m, k, n)
 	if err != nil {
 		return nil, err
@@ -156,7 +158,10 @@ func (op linAlgBinOp) MPSDo(extern External, dev Device, prealloc Value, inputs 
 
 	if reuse, ok := prealloc.(*tensor.Dense); ok && reuse.Dtype() == tensor.Float32 && reuse.Shape().Eq(tensor.Shape{m, n}) {
 		copy(reuse.Data().([]float32), out)
+		cacheMPSFloat32Value(extern, reuse)
 		return reuse, nil
 	}
-	return tensor.New(tensor.WithShape(m, n), tensor.WithBacking(out)), nil
+	retVal := tensor.New(tensor.WithShape(m, n), tensor.WithBacking(out))
+	cacheMPSFloat32Value(extern, retVal)
+	return retVal, nil
 }

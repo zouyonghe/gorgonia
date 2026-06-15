@@ -41,6 +41,8 @@ func (m *tapeMachine) init() {
 
 func (m *tapeMachine) getEngine(dev Device) tensor.Engine { return m.Engine }
 
+func (m *tapeMachine) MPSMetadata() *ExternMetadata { return &m.ExternMetadata }
+
 func (instr *execOp) exec(m *tapeMachine) (err error) {
 	m.logf("Executing %v. Node is: %x", instr, instr.id)
 	m.enterLogScope()

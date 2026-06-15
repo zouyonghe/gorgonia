@@ -16,4 +16,6 @@ func (m *lispMachine) execDevTrans(op devTrans, n *Node, children Nodes) error {
 
 func finalizeLispMachine(m *lispMachine) { m.cleanup() }
 
+func (m *lispMachine) MPSMetadata() *ExternMetadata { return &m.ExternMetadata }
+
 func (m *lispMachine) ForceCPU() {}

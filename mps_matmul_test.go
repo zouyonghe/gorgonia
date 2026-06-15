@@ -48,6 +48,31 @@ func TestMPSMatMulFloat32ThroughTapeMachine(t *testing.T) {
 	}
 }
 
+func TestMPSMatMulRegistersFloat32Values(t *testing.T) {
+	var metadata ExternMetadata
+	if !metadata.MPSAvailable() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+	if err := metadata.init(); err != nil {
+		t.Fatalf("metadata.init() error = %v", err)
+	}
+	defer metadata.cleanup()
+
+	a := tensor.New(tensor.WithShape(2, 2), tensor.WithBacking([]float32{1, 2, 3, 4}))
+	b := tensor.New(tensor.WithShape(2, 2), tensor.WithBacking([]float32{5, 6, 7, 8}))
+	op := linAlgBinOp{āBinaryOperator: matMulOperator}
+	out, err := op.MPSDo(&metadata, AppleGPU(0), nil, a, b)
+	if err != nil {
+		t.Fatalf("MPSDo() error = %v", err)
+	}
+	if out == nil {
+		t.Fatalf("MPSDo() returned nil output")
+	}
+	if got := metadata.MPSValueCount(); got != 3 {
+		t.Fatalf("MPSValueCount() = %d, want 3", got)
+	}
+}
+
 func mustLet(t *testing.T, n *Node, v interface{}) {
 	t.Helper()
 	if err := Let(n, v); err != nil {
