@@ -55,6 +55,12 @@ func (df *dataflow) analyzeDevice(n *Node) {
 		if n.dataOn == CPU {
 			n.dataOn = Device(0)
 		}
+	case MPSDoer:
+		if n.op.CallsExtern() && n.dataOn == CPU {
+			n.dataOn = Device(1)
+		} else {
+			n.dataOn = CPU
+		}
 	case CLDoer:
 		if n.dataOn == CPU {
 			n.dataOn = Device(0)

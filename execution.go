@@ -125,6 +125,20 @@ func (op *ExternalOp) Do(vals ...Value) (Value, error) {
 			return retVal, err
 		}
 		return o.CUDADo(op.External, op.Device, op.Prealloc, vals...)
+	case MPSDoer:
+		if op.Incr != nil {
+			v, err := o.MPSDo(op.External, op.Device, op.Prealloc, vals...)
+			if err != nil {
+				return nil, err
+			}
+
+			add := newEBOByType(addOpType, TypeOf(op.Incr), TypeOf(v))
+			addOp := NewExternalOp(add, op.ExecutionContext, nil)
+			addOp.UseUnsafe = true
+			retVal, err := addOp.Do(op.Incr, v)
+			return retVal, err
+		}
+		return o.MPSDo(op.External, op.Device, op.Prealloc, vals...)
 	case CLDoer:
 	case IncrDoer:
 		if op.Incr != nil {

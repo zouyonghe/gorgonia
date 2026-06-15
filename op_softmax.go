@@ -47,7 +47,7 @@ func (op *softmaxOp) Arity() int { return 1 }
 
 func (op *softmaxOp) ReturnsPtr() bool { return false }
 
-func (op *softmaxOp) CallsExtern() bool { return false }
+func (op *softmaxOp) CallsExtern() bool { return softmaxCallsExtern(op) }
 
 func (op *softmaxOp) WriteHash(h hash.Hash) { fmt.Fprintf(h, "Softmax{%v}()", op.axis) }
 
@@ -126,6 +126,7 @@ func (op *softmaxOp) UsePreallocDo(prealloc Value, inputs ...Value) (Value, erro
 
 	return prealloc, nil
 }
+
 
 // DoDiff calculates the diff and sets its value to the output node. Implementation for ADOp interface.
 func (op *softmaxOp) DoDiff(ctx ExecutionContext, inputs Nodes, output *Node) error {

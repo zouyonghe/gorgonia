@@ -40,7 +40,8 @@ func DimSizersToShapes(ds []DimSizer) ([]tensor.Shape, error) {
 // Think of them as functions, taking an input (or multiple), and outputting something
 //
 // All Ops have type signatures that look like this:
-//		OpName :: (Floats a) ⇒ Tensor a → Tensor a → Tensor a
+//
+//	OpName :: (Floats a) ⇒ Tensor a → Tensor a → Tensor a
 type Op interface {
 	/* Graph Building Related Methods */
 
@@ -152,6 +153,12 @@ type UnsafeDoer interface {
 // CUDADoer uses CUDA to perform the Op.
 type CUDADoer interface {
 	CUDADo(extern External, dev Device, prealloc Value, inputs ...Value) (retVal Value, err error)
+}
+
+// MPSDoer uses Apple's Metal Performance Shaders backend to perform the Op.
+// It is enabled only by builds that provide an MPS-capable external machine.
+type MPSDoer interface {
+	MPSDo(extern External, dev Device, prealloc Value, inputs ...Value) (retVal Value, err error)
 }
 
 // CLDoer uses OpenCL to perform the Op. As of now, there are NO Ops that support OpenCL

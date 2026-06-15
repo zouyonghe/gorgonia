@@ -1,4 +1,5 @@
-// +build !cuda
+//go:build !cuda && !mps
+// +build !cuda,!mps
 
 package gorgonia
 
