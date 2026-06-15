@@ -72,7 +72,13 @@ func (op mpsNLLLossOp) DiffWRT(inputs int) []bool {
 	return []bool{true, false}
 }
 func (op mpsNLLLossOp) SymDiff(inputs Nodes, output, gradNode *Node) (Nodes, error) {
-	return nil, errors.Errorf("MPSNLLLoss symbolic differentiation is not implemented")
+	if err := checkArity(op, len(inputs)); err != nil {
+		return nil, err
+	}
+	retVal := make(Nodes, 2)
+	var err error
+	retVal[0], err = ApplyOp(mpsNLLLossDiffOp{logProbShape: op.logProbShape}, inputs[0], inputs[1])
+	return retVal, err
 }
 func (op mpsNLLLossOp) DoDiff(ctx ExecutionContext, inputs Nodes, output *Node) error {
 	return errors.Errorf("MPSNLLLoss differentiation is not implemented")
@@ -125,3 +131,68 @@ func (op mpsNLLLossOp) compute(inputs ...Value) (Value, error) {
 func (op mpsNLLLossOp) WriteHash(h hash.Hash) { fmt.Fprint(h, "MPSNLLLoss") }
 func (op mpsNLLLossOp) Hashcode() uint32      { return simpleHash(op) }
 func (op mpsNLLLossOp) String() string        { return "MPSNLLLoss" }
+
+type mpsNLLLossDiffOp struct {
+	logProbShape tensor.Shape
+}
+
+func (op mpsNLLLossDiffOp) Arity() int { return 2 }
+
+func (op mpsNLLLossDiffOp) Type() hm.Type {
+	return hm.NewFnType(*matF32, *vecI32(), *matF32)
+}
+
+func (op mpsNLLLossDiffOp) InferShape(inputs ...DimSizer) (tensor.Shape, error) {
+	if len(inputs) != 2 {
+		return nil, errors.Errorf("MPSNLLLossDiff expects two inputs")
+	}
+	if op.logProbShape == nil {
+		return nil, errors.Errorf("MPSNLLLossDiff missing log-prob shape")
+	}
+	return op.logProbShape.Clone(), nil
+}
+
+func (op mpsNLLLossDiffOp) ReturnsPtr() bool     { return false }
+func (op mpsNLLLossDiffOp) CallsExtern() bool    { return false }
+func (op mpsNLLLossDiffOp) OverwritesInput() int { return -1 }
+
+func (op mpsNLLLossDiffOp) Do(inputs ...Value) (Value, error) {
+	if err := checkArity(op, len(inputs)); err != nil {
+		return nil, err
+	}
+	logProbs, ok := inputs[0].(*tensor.Dense)
+	if !ok {
+		return nil, errors.Errorf("MPSNLLLossDiff expected log-probs *tensor.Dense, got %T", inputs[0])
+	}
+	labels, ok := inputs[1].(*tensor.Dense)
+	if !ok {
+		return nil, errors.Errorf("MPSNLLLossDiff expected labels *tensor.Dense, got %T", inputs[1])
+	}
+	if logProbs.Dtype() != tensor.Float32 || labels.Dtype() != tensor.Int32 {
+		return nil, errors.Errorf("MPSNLLLossDiff supports float32 log-probs and int32 labels only; got %v and %v", logProbs.Dtype(), labels.Dtype())
+	}
+	if logProbs.Shape().Dims() != 2 {
+		return nil, errors.Errorf("MPSNLLLossDiff expects 2D log-probs, got %v", logProbs.Shape())
+	}
+	labelData, ok := labels.Data().([]int32)
+	if !ok {
+		return nil, errors.Errorf("MPSNLLLossDiff expected []int32 backing, got %T", labels.Data())
+	}
+	rows, cols := logProbs.Shape()[0], logProbs.Shape()[1]
+	if len(labelData) != rows {
+		return nil, errors.Errorf("MPSNLLLossDiff expected %d labels, got %d", rows, len(labelData))
+	}
+	grad := make([]float32, rows*cols)
+	scale := float32(-1) / float32(rows)
+	for row, label := range labelData {
+		if label < 0 || int(label) >= cols {
+			return nil, errors.Errorf("MPSNLLLossDiff label %d at row %d is out of range [0, %d)", label, row, cols)
+		}
+		grad[row*cols+int(label)] = scale
+	}
+	return tensor.New(tensor.WithShape(logProbs.Shape()...), tensor.WithBacking(grad)), nil
+}
+
+func (op mpsNLLLossDiffOp) WriteHash(h hash.Hash) { fmt.Fprint(h, "MPSNLLLossDiff") }
+func (op mpsNLLLossDiffOp) Hashcode() uint32      { return simpleHash(op) }
+func (op mpsNLLLossDiffOp) String() string        { return "MPSNLLLossDiff" }
