@@ -38,7 +38,33 @@ func (op mpsReLUOp) CallsExtern() bool    { return true }
 func (op mpsReLUOp) OverwritesInput() int { return -1 }
 func (op mpsReLUOp) DiffWRT(i int) []bool { return []bool{true} }
 func (op mpsReLUOp) SymDiff(inputs Nodes, output, gradNode *Node) (Nodes, error) {
-	return nil, errors.Errorf("MPSReLU symbolic differentiation is not implemented")
+	if err := checkArity(op, len(inputs)); err != nil {
+		return nil, err
+	}
+	var zero *Node
+	dt, err := dtypeOf(inputs[0].t)
+	if err != nil {
+		return nil, errors.Wrap(err, dtypeOfFail)
+	}
+	switch dt {
+	case Float32:
+		zero = zerof32
+	case Float64:
+		zero = zerof64
+	default:
+		return nil, errors.Errorf(nyiFail, "MPSReLU SymDiff", dt)
+	}
+	cmp := newElemBinOp(gteOpType, inputs[0], zero)
+	cmp.retSame = true
+	mask, err := ApplyOp(cmp, inputs[0], zero)
+	if err != nil {
+		return nil, errors.Wrap(err, applyOpFail)
+	}
+	grad, err := HadamardProd(gradNode, mask)
+	if err != nil {
+		return nil, errors.Wrap(err, applyOpFail)
+	}
+	return Nodes{grad}, nil
 }
 func (op mpsReLUOp) DoDiff(ctx ExecutionContext, inputs Nodes, output *Node) error {
 	return errors.Errorf("MPSReLU differentiation is not implemented")
