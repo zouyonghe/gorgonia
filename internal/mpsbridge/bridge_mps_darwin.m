@@ -231,6 +231,69 @@ int gorgonia_mps_elementwise_float32(const float* a, const float* b, float* out,
 	}
 }
 
+void* gorgonia_mps_elementwise_float32_buffers(void* rawA, void* rawB, int count, int op) {
+	@autoreleasepool {
+		if (rawA == NULL || rawB == NULL || count <= 0) {
+			return NULL;
+		}
+
+		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+		if (device == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> aBuffer = (__bridge id<MTLBuffer>)rawA;
+		id<MTLBuffer> bBuffer = (__bridge id<MTLBuffer>)rawB;
+		NSUInteger length = (NSUInteger)count * sizeof(float);
+		if ([aBuffer length] < length || [bBuffer length] < length) {
+			return NULL;
+		}
+
+		MPSGraph *graph = [[MPSGraph alloc] init];
+		if (graph == nil) {
+			return NULL;
+		}
+
+		MPSShape *shape = @[@(count)];
+		MPSGraphTensor *aTensor = [graph placeholderWithShape:shape dataType:MPSDataTypeFloat32 name:@"a"];
+		MPSGraphTensor *bTensor = [graph placeholderWithShape:shape dataType:MPSDataTypeFloat32 name:@"b"];
+		MPSGraphTensor *result = nil;
+		switch (op) {
+			case 0:
+				result = [graph additionWithPrimaryTensor:aTensor secondaryTensor:bTensor name:@"add"];
+				break;
+			case 1:
+				result = [graph subtractionWithPrimaryTensor:aTensor secondaryTensor:bTensor name:@"sub"];
+				break;
+			case 2:
+				result = [graph multiplicationWithPrimaryTensor:aTensor secondaryTensor:bTensor name:@"mul"];
+				break;
+			default:
+				return NULL;
+		}
+
+		MPSGraphTensorData *aData = [[MPSGraphTensorData alloc] initWithMTLBuffer:aBuffer shape:shape dataType:MPSDataTypeFloat32];
+		MPSGraphTensorData *bData = [[MPSGraphTensorData alloc] initWithMTLBuffer:bBuffer shape:shape dataType:MPSDataTypeFloat32];
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = @{
+			aTensor: aData,
+			bTensor: bData,
+		};
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [graph runWithFeeds:feeds targetTensors:@[result] targetOperations:nil];
+		MPSGraphTensorData *resultData = results[result];
+		MPSNDArray *resultArray = [resultData mpsndarray];
+		if (resultData == nil || resultArray == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> outBuffer = [device newBufferWithLength:length options:MTLResourceStorageModeShared];
+		if (outBuffer == nil) {
+			return NULL;
+		}
+		[resultArray readBytes:[outBuffer contents] strideBytes:nil];
+		return (__bridge_retained void*)outBuffer;
+	}
+}
+
 int gorgonia_mps_relu_float32(const float* input, float* out, int count) {
 	@autoreleasepool {
 		if (input == NULL || out == NULL || count <= 0) {

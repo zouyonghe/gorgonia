@@ -89,24 +89,66 @@ func (op elemBinOp) MPSDo(extern External, dev Device, prealloc Value, inputs ..
 	if !ok {
 		return nil, errors.Errorf("MPS add expected right []float32 backing, got %T", b.Data())
 	}
+	metadata := mpsMetadataFromExternal(extern)
 	var out []float32
+	var outBuffer *mpsbridge.Float32Buffer
 	var err error
-	switch op.binOpType() {
-	case addOpType:
-		out, err = mpsbridge.AddFloat32(left, right)
-	case subOpType:
-		out, err = mpsbridge.SubFloat32(left, right)
-	case mulOpType:
-		out, err = mpsbridge.MulFloat32(left, right)
+	if metadata != nil {
+		leftValue, err := metadata.CacheFloat32Value(a)
+		if err != nil {
+			return nil, err
+		}
+		rightValue, err := metadata.CacheFloat32Value(b)
+		if err != nil {
+			return nil, err
+		}
+		switch op.binOpType() {
+		case addOpType:
+			outBuffer, err = mpsbridge.AddFloat32Buffers(mpsFloat32ValueBuffer(leftValue), mpsFloat32ValueBuffer(rightValue))
+		case subOpType:
+			outBuffer, err = mpsbridge.SubFloat32Buffers(mpsFloat32ValueBuffer(leftValue), mpsFloat32ValueBuffer(rightValue))
+		case mulOpType:
+			outBuffer, err = mpsbridge.MulFloat32Buffers(mpsFloat32ValueBuffer(leftValue), mpsFloat32ValueBuffer(rightValue))
+		}
+		if err != nil {
+			return nil, err
+		}
+		out, err = outBuffer.Float32s()
+	} else {
+		switch op.binOpType() {
+		case addOpType:
+			out, err = mpsbridge.AddFloat32(left, right)
+		case subOpType:
+			out, err = mpsbridge.SubFloat32(left, right)
+		case mulOpType:
+			out, err = mpsbridge.MulFloat32(left, right)
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
 	if reuse, ok := prealloc.(*tensor.Dense); ok && reuse.Dtype() == tensor.Float32 && reuse.Shape().Eq(a.Shape()) {
 		copy(reuse.Data().([]float32), out)
+		if metadata != nil && outBuffer != nil {
+			if _, err := metadata.TrackFloat32Value(reuse, outBuffer); err != nil {
+				outBuffer.Close()
+				return nil, err
+			}
+		} else {
+			cacheMPSFloat32Value(extern, reuse)
+		}
 		return reuse, nil
 	}
-	return tensor.New(tensor.WithShape(a.Shape()...), tensor.WithBacking(out)), nil
+	retVal := tensor.New(tensor.WithShape(a.Shape()...), tensor.WithBacking(out))
+	if metadata != nil && outBuffer != nil {
+		if _, err := metadata.TrackFloat32Value(retVal, outBuffer); err != nil {
+			outBuffer.Close()
+			return nil, err
+		}
+	} else {
+		cacheMPSFloat32Value(extern, retVal)
+	}
+	return retVal, nil
 }
 
 // MPSDo executes the supported linear algebra op through Apple's MPSGraph backend.

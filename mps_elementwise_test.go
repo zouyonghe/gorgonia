@@ -43,6 +43,41 @@ func TestMPSElementwiseSubMulFloat32ThroughTapeMachine(t *testing.T) {
 	assertNodeFloat32Value(t, mul, []float32{5, -12, -26.25, 32})
 }
 
+func TestMPSElementwiseRegistersFloat32Values(t *testing.T) {
+	var metadata ExternMetadata
+	if !metadata.MPSAvailable() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+	if err := metadata.init(); err != nil {
+		t.Fatalf("metadata.init() error = %v", err)
+	}
+	defer metadata.cleanup()
+
+	a := tensor.New(tensor.WithShape(2, 2), tensor.WithBacking([]float32{1, -2, 3.5, 4}))
+	b := tensor.New(tensor.WithShape(2, 2), tensor.WithBacking([]float32{5, 6, -7.5, 8}))
+	for _, tc := range []struct {
+		name string
+		op   ʘBinaryOperatorType
+	}{
+		{name: "add", op: addOpType},
+		{name: "sub", op: subOpType},
+		{name: "mul", op: mulOpType},
+	} {
+		metadata.Reset()
+		op := newEBOByType(tc.op, TypeOf(a), TypeOf(b))
+		out, err := op.MPSDo(&metadata, AppleGPU(0), nil, a, b)
+		if err != nil {
+			t.Fatalf("%s MPSDo() error = %v", tc.name, err)
+		}
+		if out == nil {
+			t.Fatalf("%s MPSDo() returned nil output", tc.name)
+		}
+		if got := metadata.MPSValueCount(); got != 3 {
+			t.Fatalf("%s MPSValueCount() = %d, want 3", tc.name, got)
+		}
+	}
+}
+
 func assertNodeFloat32Value(t *testing.T, n *Node, want []float32) {
 	t.Helper()
 	gotT, ok := n.Value().(*tensor.Dense)
