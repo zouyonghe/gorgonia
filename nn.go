@@ -134,6 +134,13 @@ func LeakyRelu(x *Node, alpha float64) (*Node, error) {
 // This function uses ⩾, which is the canonical version. If you want to use >, you can create
 // your own by just following this.
 func Rectify(x *Node) (retVal *Node, err error) {
+	if retVal, ok, err := maybeMPSRectify(x); ok || err != nil {
+		return retVal, err
+	}
+	return rectifyCPU(x)
+}
+
+func rectifyCPU(x *Node) (retVal *Node, err error) {
 	var zero *Node
 	var dt tensor.Dtype
 	group := encoding.NewGroup("Rectify")
