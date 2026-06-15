@@ -15,6 +15,7 @@ void* gorgonia_mps_matmul_float32_buffers(void* a, void* b, int m, int k, int n)
 int gorgonia_mps_add_float32(const float* a, const float* b, float* out, int count);
 int gorgonia_mps_elementwise_float32(const float* a, const float* b, float* out, int count, int op);
 int gorgonia_mps_relu_float32(const float* input, float* out, int count);
+void* gorgonia_mps_relu_float32_buffer(void* input, int count);
 int gorgonia_mps_add_row_bias_float32(const float* matrix, const float* bias, float* out, int rows, int cols);
 int gorgonia_mps_softmax_rows_float32(const float* input, float* out, int rows, int cols, int log_output);
 

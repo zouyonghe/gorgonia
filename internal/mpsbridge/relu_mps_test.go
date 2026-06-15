@@ -23,3 +23,25 @@ func TestReLUFloat32RejectsEmptyInput(t *testing.T) {
 		t.Fatal("expected empty input error")
 	}
 }
+
+func TestReLUFloat32Buffer(t *testing.T) {
+	if !Available() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+
+	input, err := NewFloat32Buffer([]float32{-3, -0.5, 0, 2, 4})
+	if err != nil {
+		t.Fatalf("NewFloat32Buffer() error = %v", err)
+	}
+	defer input.Close()
+	out, err := ReLUFloat32Buffer(input)
+	if err != nil {
+		t.Fatalf("ReLUFloat32Buffer() error = %v", err)
+	}
+	defer out.Close()
+	got, err := out.Float32s()
+	if err != nil {
+		t.Fatalf("Float32s() error = %v", err)
+	}
+	assertFloat32sEqual(t, got, []float32{0, 0, 0, 2, 4})
+}

@@ -65,3 +65,26 @@ func TestRectifyFloat32UsesMPSReLUThroughTapeMachine(t *testing.T) {
 
 	assertNodeFloat32Value(t, y, []float32{0, 0, 0, 2, 4, 0})
 }
+
+func TestMPSReLURegistersFloat32Values(t *testing.T) {
+	var metadata ExternMetadata
+	if !metadata.MPSAvailable() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+	if err := metadata.init(); err != nil {
+		t.Fatalf("metadata.init() error = %v", err)
+	}
+	defer metadata.cleanup()
+
+	x := tensor.New(tensor.WithShape(2, 3), tensor.WithBacking([]float32{-3, -0.5, 0, 2, 4, -9}))
+	out, err := (mpsReLUOp{}).MPSDo(&metadata, AppleGPU(0), nil, x)
+	if err != nil {
+		t.Fatalf("MPSDo() error = %v", err)
+	}
+	if out == nil {
+		t.Fatalf("MPSDo() returned nil output")
+	}
+	if got := metadata.MPSValueCount(); got != 2 {
+		t.Fatalf("MPSValueCount() = %d, want 2", got)
+	}
+}

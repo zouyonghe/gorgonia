@@ -107,15 +107,48 @@ func (op mpsReLUOp) MPSDo(extern External, dev Device, prealloc Value, inputs ..
 	if !ok {
 		return nil, errors.Errorf("MPSReLU expected []float32 backing, got %T", x.Data())
 	}
-	out, err := mpsbridge.ReLUFloat32(in)
+	metadata := mpsMetadataFromExternal(extern)
+	var out []float32
+	var outBuffer *mpsbridge.Float32Buffer
+	var err error
+	if metadata != nil {
+		inputValue, err := metadata.CacheFloat32Value(x)
+		if err != nil {
+			return nil, err
+		}
+		outBuffer, err = mpsbridge.ReLUFloat32Buffer(mpsFloat32ValueBuffer(inputValue))
+		if err != nil {
+			return nil, err
+		}
+		out, err = outBuffer.Float32s()
+	} else {
+		out, err = mpsbridge.ReLUFloat32(in)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if reuse, ok := prealloc.(*tensor.Dense); ok && reuse.Dtype() == tensor.Float32 && reuse.Shape().Eq(x.Shape()) {
 		copy(reuse.Data().([]float32), out)
+		if metadata != nil && outBuffer != nil {
+			if _, err := metadata.TrackFloat32Value(reuse, outBuffer); err != nil {
+				outBuffer.Close()
+				return nil, err
+			}
+		} else {
+			cacheMPSFloat32Value(extern, reuse)
+		}
 		return reuse, nil
 	}
-	return tensor.New(tensor.WithShape(x.Shape()...), tensor.WithBacking(out)), nil
+	retVal := tensor.New(tensor.WithShape(x.Shape()...), tensor.WithBacking(out))
+	if metadata != nil && outBuffer != nil {
+		if _, err := metadata.TrackFloat32Value(retVal, outBuffer); err != nil {
+			outBuffer.Close()
+			return nil, err
+		}
+	} else {
+		cacheMPSFloat32Value(extern, retVal)
+	}
+	return retVal, nil
 }
 
 func (op mpsReLUOp) WriteHash(h hash.Hash) { fmt.Fprint(h, "MPSReLU") }

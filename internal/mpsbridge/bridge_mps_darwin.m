@@ -269,6 +269,49 @@ int gorgonia_mps_relu_float32(const float* input, float* out, int count) {
 	}
 }
 
+void* gorgonia_mps_relu_float32_buffer(void* rawInput, int count) {
+	@autoreleasepool {
+		if (rawInput == NULL || count <= 0) {
+			return NULL;
+		}
+
+		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+		if (device == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> inputBuffer = (__bridge id<MTLBuffer>)rawInput;
+		NSUInteger length = (NSUInteger)count * sizeof(float);
+		if ([inputBuffer length] < length) {
+			return NULL;
+		}
+
+		MPSGraph *graph = [[MPSGraph alloc] init];
+		if (graph == nil) {
+			return NULL;
+		}
+
+		MPSShape *shape = @[@(count)];
+		MPSGraphTensor *inputTensor = [graph placeholderWithShape:shape dataType:MPSDataTypeFloat32 name:@"input"];
+		MPSGraphTensor *relu = [graph reLUWithTensor:inputTensor name:@"relu"];
+		MPSGraphTensorData *inputData = [[MPSGraphTensorData alloc] initWithMTLBuffer:inputBuffer shape:shape dataType:MPSDataTypeFloat32];
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = @{ inputTensor: inputData };
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [graph runWithFeeds:feeds targetTensors:@[relu] targetOperations:nil];
+		MPSGraphTensorData *reluData = results[relu];
+		MPSNDArray *reluArray = [reluData mpsndarray];
+		if (reluData == nil || reluArray == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> outBuffer = [device newBufferWithLength:length options:MTLResourceStorageModeShared];
+		if (outBuffer == nil) {
+			return NULL;
+		}
+		[reluArray readBytes:[outBuffer contents] strideBytes:nil];
+		return (__bridge_retained void*)outBuffer;
+	}
+}
+
 int gorgonia_mps_add_row_bias_float32(const float* matrix, const float* bias, float* out, int rows, int cols) {
 	@autoreleasepool {
 		if (matrix == NULL || bias == NULL || out == NULL || rows <= 0 || cols <= 0) {
