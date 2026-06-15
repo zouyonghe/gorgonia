@@ -47,6 +47,7 @@ type ExternMetadata struct {
 	deviceName    string
 	memories      map[uintptr]mpsHostMemory
 	values        map[*MPSFloat32Value]struct{}
+	denseValues   map[*tensor.Dense]*MPSFloat32Value
 }
 
 type mpsHostMemory struct {
@@ -118,6 +119,7 @@ func (m *ExternMetadata) init() error {
 	m.deviceName = mpsbridge.DeviceName()
 	m.memories = make(map[uintptr]mpsHostMemory)
 	m.values = make(map[*MPSFloat32Value]struct{})
+	m.denseValues = make(map[*tensor.Dense]*MPSFloat32Value)
 	m.initialized = true
 	return nil
 }
@@ -131,6 +133,7 @@ func (m *ExternMetadata) cleanup() {
 		value.Close()
 	}
 	m.values = nil
+	m.denseValues = nil
 	m.memories = nil
 	m.initialized = false
 }
@@ -147,6 +150,14 @@ func (m *ExternMetadata) CacheFloat32Value(value *tensor.Dense) (*MPSFloat32Valu
 	if !ok {
 		return nil, errors.New("MPS value cache expected []float32 backing")
 	}
+	m.Lock()
+	if m.denseValues != nil {
+		if cached := m.denseValues[value]; cached != nil && !cached.closed {
+			m.Unlock()
+			return cached, nil
+		}
+	}
+	m.Unlock()
 	buffer, err := mpsbridge.NewFloat32Buffer(data)
 	if err != nil {
 		return nil, err
@@ -156,9 +167,56 @@ func (m *ExternMetadata) CacheFloat32Value(value *tensor.Dense) (*MPSFloat32Valu
 	if m.values == nil {
 		m.values = make(map[*MPSFloat32Value]struct{})
 	}
+	if m.denseValues == nil {
+		m.denseValues = make(map[*tensor.Dense]*MPSFloat32Value)
+	}
 	m.values[mpsValue] = struct{}{}
+	m.denseValues[value] = mpsValue
 	m.Unlock()
 	return mpsValue, nil
+}
+
+// TrackFloat32Value registers an existing Metal buffer as the value for a dense tensor.
+func (m *ExternMetadata) TrackFloat32Value(value *tensor.Dense, buffer *mpsbridge.Float32Buffer) (*MPSFloat32Value, error) {
+	if value == nil {
+		return nil, errors.New("cannot track nil tensor as MPS value")
+	}
+	if value.Dtype() != tensor.Float32 {
+		return nil, errors.New("MPS value registry supports float32 tensors only")
+	}
+	if buffer == nil {
+		return nil, errors.New("cannot track nil MPS buffer")
+	}
+	mpsValue := &MPSFloat32Value{buffer: buffer, shape: value.Shape().Clone()}
+	m.Lock()
+	if m.values == nil {
+		m.values = make(map[*MPSFloat32Value]struct{})
+	}
+	if m.denseValues == nil {
+		m.denseValues = make(map[*tensor.Dense]*MPSFloat32Value)
+	}
+	if old := m.denseValues[value]; old != nil {
+		delete(m.values, old)
+		old.Close()
+	}
+	m.values[mpsValue] = struct{}{}
+	m.denseValues[value] = mpsValue
+	m.Unlock()
+	return mpsValue, nil
+}
+
+// CachedFloat32Value returns the tracked MPS value for a dense tensor, if present.
+func (m *ExternMetadata) CachedFloat32Value(value *tensor.Dense) (*MPSFloat32Value, bool) {
+	m.Lock()
+	defer m.Unlock()
+	if value == nil || m.denseValues == nil {
+		return nil, false
+	}
+	mpsValue := m.denseValues[value]
+	if mpsValue == nil || mpsValue.closed {
+		return nil, false
+	}
+	return mpsValue, true
 }
 
 // ReleaseMPSValue releases a cached MPS value and removes it from the registry.
@@ -168,6 +226,11 @@ func (m *ExternMetadata) ReleaseMPSValue(value *MPSFloat32Value) {
 	}
 	m.Lock()
 	delete(m.values, value)
+	for dense, tracked := range m.denseValues {
+		if tracked == value {
+			delete(m.denseValues, dense)
+		}
+	}
 	m.Unlock()
 	value.Close()
 }
@@ -205,6 +268,13 @@ func mpsMetadataFromExternal(extern External) *ExternMetadata {
 }
 
 func (m *ExternMetadata) MPSMetadata() *ExternMetadata { return m }
+
+func mpsFloat32ValueBuffer(value *MPSFloat32Value) *mpsbridge.Float32Buffer {
+	if value == nil || value.closed {
+		return nil
+	}
+	return value.buffer
+}
 
 // HasFunc reports whether an external function has been loaded.
 func (m ExternMetadata) HasFunc(name string) bool { return false }
@@ -305,6 +375,7 @@ func (m *ExternMetadata) Reset() {
 	}
 	m.memories = make(map[uintptr]mpsHostMemory)
 	m.values = make(map[*MPSFloat32Value]struct{})
+	m.denseValues = make(map[*tensor.Dense]*MPSFloat32Value)
 }
 
 // Cleanup cleans up ancillary allocations made during external execution.

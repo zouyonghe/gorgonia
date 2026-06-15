@@ -11,6 +11,7 @@ void* gorgonia_mps_new_float32_buffer(const float* data, int count);
 int gorgonia_mps_read_float32_buffer(void* buffer, float* out, int count);
 void gorgonia_mps_release_buffer(void* buffer);
 int gorgonia_mps_matmul_float32(const float* a, const float* b, float* out, int m, int k, int n);
+void* gorgonia_mps_matmul_float32_buffers(void* a, void* b, int m, int k, int n);
 int gorgonia_mps_add_float32(const float* a, const float* b, float* out, int count);
 int gorgonia_mps_elementwise_float32(const float* a, const float* b, float* out, int count, int op);
 int gorgonia_mps_relu_float32(const float* input, float* out, int count);

@@ -35,6 +35,34 @@ func TestMatMulFloat32RejectsBadShapes(t *testing.T) {
 	}
 }
 
+func TestMatMulFloat32Buffers(t *testing.T) {
+	if !Available() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+
+	a, err := NewFloat32Buffer([]float32{1, 2, 3, 4})
+	if err != nil {
+		t.Fatalf("NewFloat32Buffer(a) error = %v", err)
+	}
+	defer a.Close()
+	b, err := NewFloat32Buffer([]float32{5, 6, 7, 8})
+	if err != nil {
+		t.Fatalf("NewFloat32Buffer(b) error = %v", err)
+	}
+	defer b.Close()
+
+	out, err := MatMulFloat32Buffers(a, b, 2, 2, 2)
+	if err != nil {
+		t.Fatalf("MatMulFloat32Buffers() error = %v", err)
+	}
+	defer out.Close()
+	got, err := out.Float32s()
+	if err != nil {
+		t.Fatalf("Float32s() error = %v", err)
+	}
+	assertFloat32sEqual(t, got, []float32{19, 22, 43, 50})
+}
+
 func assertFloat32sEqual(t *testing.T, got, want []float32) {
 	t.Helper()
 	if len(got) != len(want) {

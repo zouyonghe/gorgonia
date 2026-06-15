@@ -118,6 +118,57 @@ int gorgonia_mps_matmul_float32(const float* a, const float* b, float* out, int 
 	}
 }
 
+void* gorgonia_mps_matmul_float32_buffers(void* rawA, void* rawB, int m, int k, int n) {
+	@autoreleasepool {
+		if (rawA == NULL || rawB == NULL || m <= 0 || k <= 0 || n <= 0) {
+			return NULL;
+		}
+
+		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+		if (device == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> aBuffer = (__bridge id<MTLBuffer>)rawA;
+		id<MTLBuffer> bBuffer = (__bridge id<MTLBuffer>)rawB;
+		NSUInteger aLength = (NSUInteger)m * (NSUInteger)k * sizeof(float);
+		NSUInteger bLength = (NSUInteger)k * (NSUInteger)n * sizeof(float);
+		NSUInteger outLength = (NSUInteger)m * (NSUInteger)n * sizeof(float);
+		if ([aBuffer length] < aLength || [bBuffer length] < bLength) {
+			return NULL;
+		}
+
+		MPSGraph *graph = [[MPSGraph alloc] init];
+		if (graph == nil) {
+			return NULL;
+		}
+
+		MPSGraphTensor *aTensor = [graph placeholderWithShape:@[@(m), @(k)] dataType:MPSDataTypeFloat32 name:@"a"];
+		MPSGraphTensor *bTensor = [graph placeholderWithShape:@[@(k), @(n)] dataType:MPSDataTypeFloat32 name:@"b"];
+		MPSGraphTensor *product = [graph matrixMultiplicationWithPrimaryTensor:aTensor secondaryTensor:bTensor name:@"matmul"];
+
+		MPSGraphTensorData *aData = [[MPSGraphTensorData alloc] initWithMTLBuffer:aBuffer shape:@[@(m), @(k)] dataType:MPSDataTypeFloat32];
+		MPSGraphTensorData *bData = [[MPSGraphTensorData alloc] initWithMTLBuffer:bBuffer shape:@[@(k), @(n)] dataType:MPSDataTypeFloat32];
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = @{
+			aTensor: aData,
+			bTensor: bData,
+		};
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [graph runWithFeeds:feeds targetTensors:@[product] targetOperations:nil];
+		MPSGraphTensorData *productData = results[product];
+		MPSNDArray *productArray = [productData mpsndarray];
+		if (productData == nil || productArray == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> outBuffer = [device newBufferWithLength:outLength options:MTLResourceStorageModeShared];
+		if (outBuffer == nil) {
+			return NULL;
+		}
+		[productArray readBytes:[outBuffer contents] strideBytes:nil];
+		return (__bridge_retained void*)outBuffer;
+	}
+}
+
 int gorgonia_mps_add_float32(const float* a, const float* b, float* out, int count) {
 	return gorgonia_mps_elementwise_float32(a, b, out, count, 0);
 }

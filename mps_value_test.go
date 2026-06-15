@@ -27,6 +27,16 @@ func TestMPSFloat32ValueRegistry(t *testing.T) {
 	if got := metadata.MPSValueCount(); got != 1 {
 		t.Fatalf("MPSValueCount() = %d, want 1", got)
 	}
+	secondMPSValue, err := metadata.CacheFloat32Value(value)
+	if err != nil {
+		t.Fatalf("second CacheFloat32Value() error = %v", err)
+	}
+	if secondMPSValue != mpsValue {
+		t.Fatalf("second CacheFloat32Value() returned different MPS value")
+	}
+	if got := metadata.MPSValueCount(); got != 1 {
+		t.Fatalf("MPSValueCount() after repeated cache = %d, want 1", got)
+	}
 
 	readBack, err := mpsValue.Float32s()
 	if err != nil {
