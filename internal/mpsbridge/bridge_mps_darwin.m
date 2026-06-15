@@ -422,6 +422,58 @@ int gorgonia_mps_add_row_bias_float32(const float* matrix, const float* bias, fl
 	}
 }
 
+void* gorgonia_mps_add_row_bias_float32_buffers(void* rawMatrix, void* rawBias, int rows, int cols) {
+	@autoreleasepool {
+		if (rawMatrix == NULL || rawBias == NULL || rows <= 0 || cols <= 0) {
+			return NULL;
+		}
+
+		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+		if (device == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> matrixBuffer = (__bridge id<MTLBuffer>)rawMatrix;
+		id<MTLBuffer> biasBuffer = (__bridge id<MTLBuffer>)rawBias;
+		NSUInteger matrixLength = (NSUInteger)rows * (NSUInteger)cols * sizeof(float);
+		NSUInteger biasLength = (NSUInteger)cols * sizeof(float);
+		if ([matrixBuffer length] < matrixLength || [biasBuffer length] < biasLength) {
+			return NULL;
+		}
+
+		MPSGraph *graph = [[MPSGraph alloc] init];
+		if (graph == nil) {
+			return NULL;
+		}
+
+		MPSShape *matrixShape = @[@(rows), @(cols)];
+		MPSShape *biasShape = @[@(cols)];
+		MPSGraphTensor *matrixTensor = [graph placeholderWithShape:matrixShape dataType:MPSDataTypeFloat32 name:@"matrix"];
+		MPSGraphTensor *biasTensor = [graph placeholderWithShape:biasShape dataType:MPSDataTypeFloat32 name:@"bias"];
+		MPSGraphTensor *sum = [graph additionWithPrimaryTensor:matrixTensor secondaryTensor:biasTensor name:@"row_bias_add"];
+
+		MPSGraphTensorData *matrixData = [[MPSGraphTensorData alloc] initWithMTLBuffer:matrixBuffer shape:matrixShape dataType:MPSDataTypeFloat32];
+		MPSGraphTensorData *biasData = [[MPSGraphTensorData alloc] initWithMTLBuffer:biasBuffer shape:biasShape dataType:MPSDataTypeFloat32];
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = @{
+			matrixTensor: matrixData,
+			biasTensor: biasData,
+		};
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [graph runWithFeeds:feeds targetTensors:@[sum] targetOperations:nil];
+		MPSGraphTensorData *sumData = results[sum];
+		MPSNDArray *sumArray = [sumData mpsndarray];
+		if (sumData == nil || sumArray == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> outBuffer = [device newBufferWithLength:matrixLength options:MTLResourceStorageModeShared];
+		if (outBuffer == nil) {
+			return NULL;
+		}
+		[sumArray readBytes:[outBuffer contents] strideBytes:nil];
+		return (__bridge_retained void*)outBuffer;
+	}
+}
+
 int gorgonia_mps_softmax_rows_float32(const float* input, float* out, int rows, int cols, int log_output) {
 	@autoreleasepool {
 		if (input == NULL || out == NULL || rows <= 0 || cols <= 0) {

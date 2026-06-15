@@ -127,6 +127,9 @@ func Ne(a, b *Node, retSame bool) (*Node, error) {
 
 //Add performs a add. The operation is precomposed with a broadcast such that the shapes matches before operations commence.
 func BroadcastAdd(a, b *Node, leftPattern, rightPattern []byte) (*Node, error) {
+	if n, ok, err := tryMPSBroadcastAdd(a, b, leftPattern, rightPattern); ok || err != nil {
+		return n, err
+	}
 	a2, b2, err := Broadcast(a, b, NewBroadcastPattern(leftPattern, rightPattern))
 	if err != nil {
 		return nil, err

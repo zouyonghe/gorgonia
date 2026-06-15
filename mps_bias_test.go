@@ -22,6 +22,9 @@ func TestMPSAddRowBiasFloat32ThroughTapeMachine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
+	if _, ok := z.op.(mpsRowBiasAddOp); !ok {
+		t.Fatalf("BroadcastAdd() op = %T, want mpsRowBiasAddOp", z.op)
+	}
 
 	m := NewTapeMachine(g)
 	if m.Prog().gpulocs == 0 {
@@ -36,4 +39,28 @@ func TestMPSAddRowBiasFloat32ThroughTapeMachine(t *testing.T) {
 	}
 
 	assertNodeFloat32Value(t, z, []float32{11, 22, 33, 14, 25, 36})
+}
+
+func TestMPSAddRowBiasRegistersFloat32Values(t *testing.T) {
+	var metadata ExternMetadata
+	if !metadata.MPSAvailable() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+	if err := metadata.init(); err != nil {
+		t.Fatalf("metadata.init() error = %v", err)
+	}
+	defer metadata.cleanup()
+
+	matrix := tensor.New(tensor.WithShape(2, 3), tensor.WithBacking([]float32{1, 2, 3, 4, 5, 6}))
+	bias := tensor.New(tensor.WithShape(3), tensor.WithBacking([]float32{10, 20, 30}))
+	out, err := (mpsRowBiasAddOp{}).MPSDo(&metadata, AppleGPU(0), nil, matrix, bias)
+	if err != nil {
+		t.Fatalf("MPSDo() error = %v", err)
+	}
+	if out == nil {
+		t.Fatalf("MPSDo() returned nil output")
+	}
+	if got := metadata.MPSValueCount(); got != 3 {
+		t.Fatalf("MPSValueCount() = %d, want 3", got)
+	}
 }
