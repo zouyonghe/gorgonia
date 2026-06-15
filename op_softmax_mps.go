@@ -38,17 +38,53 @@ func (op *softmaxOp) MPSDo(extern External, dev Device, prealloc Value, inputs .
 		return nil, errors.Errorf("MPS softmax expected []float32 backing, got %T", x.Data())
 	}
 	var out []float32
-	if op.isLog {
-		out, err = mpsbridge.LogSoftMaxRowsFloat32(in, x.Shape()[0], x.Shape()[1])
+	var outBuffer *mpsbridge.Float32Buffer
+	metadata := mpsMetadataFromExternal(extern)
+	rows, cols := x.Shape()[0], x.Shape()[1]
+	if metadata != nil {
+		inputValue, err := metadata.CacheFloat32Value(x)
+		if err != nil {
+			return nil, err
+		}
+		if op.isLog {
+			outBuffer, err = mpsbridge.LogSoftMaxRowsFloat32Buffer(mpsFloat32ValueBuffer(inputValue), rows, cols)
+		} else {
+			outBuffer, err = mpsbridge.SoftMaxRowsFloat32Buffer(mpsFloat32ValueBuffer(inputValue), rows, cols)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out, err = outBuffer.Float32s()
 	} else {
-		out, err = mpsbridge.SoftMaxRowsFloat32(in, x.Shape()[0], x.Shape()[1])
+		if op.isLog {
+			out, err = mpsbridge.LogSoftMaxRowsFloat32(in, rows, cols)
+		} else {
+			out, err = mpsbridge.SoftMaxRowsFloat32(in, rows, cols)
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
 	if reuse, ok := prealloc.(*tensor.Dense); ok && reuse.Dtype() == tensor.Float32 && reuse.Shape().Eq(x.Shape()) {
 		copy(reuse.Data().([]float32), out)
+		if metadata != nil && outBuffer != nil {
+			if _, err := metadata.TrackFloat32Value(reuse, outBuffer); err != nil {
+				outBuffer.Close()
+				return nil, err
+			}
+		} else {
+			cacheMPSFloat32Value(extern, reuse)
+		}
 		return reuse, nil
 	}
-	return tensor.New(tensor.WithShape(x.Shape()...), tensor.WithBacking(out)), nil
+	retVal := tensor.New(tensor.WithShape(x.Shape()...), tensor.WithBacking(out))
+	if metadata != nil && outBuffer != nil {
+		if _, err := metadata.TrackFloat32Value(retVal, outBuffer); err != nil {
+			outBuffer.Close()
+			return nil, err
+		}
+	} else {
+		cacheMPSFloat32Value(extern, retVal)
+	}
+	return retVal, nil
 }

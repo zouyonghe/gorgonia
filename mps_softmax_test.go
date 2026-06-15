@@ -76,6 +76,40 @@ func TestMPSLogSoftMaxFloat32ThroughTapeMachine(t *testing.T) {
 	}, 1e-5)
 }
 
+func TestMPSSoftMaxRegistersFloat32Values(t *testing.T) {
+	var metadata ExternMetadata
+	if !metadata.MPSAvailable() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+	if err := metadata.init(); err != nil {
+		t.Fatalf("metadata.init() error = %v", err)
+	}
+	defer metadata.cleanup()
+
+	x := tensor.New(tensor.WithShape(2, 3), tensor.WithBacking([]float32{1, 2, 3, 1, 1, 1}))
+	for _, tc := range []struct {
+		name  string
+		isLog bool
+	}{
+		{name: "softmax"},
+		{name: "logsoftmax", isLog: true},
+	} {
+		metadata.Reset()
+		op := newSoftmaxOp(x.Shape())
+		op.isLog = tc.isLog
+		out, err := op.MPSDo(&metadata, AppleGPU(0), nil, x)
+		if err != nil {
+			t.Fatalf("%s MPSDo() error = %v", tc.name, err)
+		}
+		if out == nil {
+			t.Fatalf("%s MPSDo() returned nil output", tc.name)
+		}
+		if got := metadata.MPSValueCount(); got != 2 {
+			t.Fatalf("%s MPSValueCount() = %d, want 2", tc.name, got)
+		}
+	}
+}
+
 func assertNodeFloat32ValueClose(t *testing.T, node *Node, want []float32, tolerance float64) {
 	t.Helper()
 	value, ok := node.Value().(*tensor.Dense)

@@ -515,3 +515,50 @@ int gorgonia_mps_softmax_rows_float32(const float* input, float* out, int rows, 
 		return 1;
 	}
 }
+
+void* gorgonia_mps_softmax_rows_float32_buffers(void* rawInput, int rows, int cols, int logOutput) {
+	@autoreleasepool {
+		if (rawInput == NULL || rows <= 0 || cols <= 0) {
+			return NULL;
+		}
+
+		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+		if (device == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> inputBuffer = (__bridge id<MTLBuffer>)rawInput;
+		NSUInteger length = (NSUInteger)rows * (NSUInteger)cols * sizeof(float);
+		if ([inputBuffer length] < length) {
+			return NULL;
+		}
+
+		MPSGraph *graph = [[MPSGraph alloc] init];
+		if (graph == nil) {
+			return NULL;
+		}
+
+		MPSShape *shape = @[@(rows), @(cols)];
+		MPSGraphTensor *inputTensor = [graph placeholderWithShape:shape dataType:MPSDataTypeFloat32 name:@"input"];
+		MPSGraphTensor *outputTensor = [graph softMaxWithTensor:inputTensor axis:1 name:@"softmax"];
+		if (logOutput) {
+			outputTensor = [graph logarithmWithTensor:outputTensor name:@"log_softmax"];
+		}
+
+		MPSGraphTensorData *inputData = [[MPSGraphTensorData alloc] initWithMTLBuffer:inputBuffer shape:shape dataType:MPSDataTypeFloat32];
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = @{ inputTensor: inputData };
+		NSDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [graph runWithFeeds:feeds targetTensors:@[outputTensor] targetOperations:nil];
+		MPSGraphTensorData *outputData = results[outputTensor];
+		MPSNDArray *outputArray = [outputData mpsndarray];
+		if (outputData == nil || outputArray == nil) {
+			return NULL;
+		}
+
+		id<MTLBuffer> outBuffer = [device newBufferWithLength:length options:MTLResourceStorageModeShared];
+		if (outBuffer == nil) {
+			return NULL;
+		}
+		[outputArray readBytes:[outBuffer contents] strideBytes:nil];
+		return (__bridge_retained void*)outBuffer;
+	}
+}

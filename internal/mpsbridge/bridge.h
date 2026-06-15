@@ -20,6 +20,7 @@ void* gorgonia_mps_relu_float32_buffer(void* input, int count);
 int gorgonia_mps_add_row_bias_float32(const float* matrix, const float* bias, float* out, int rows, int cols);
 void* gorgonia_mps_add_row_bias_float32_buffers(void* matrix, void* bias, int rows, int cols);
 int gorgonia_mps_softmax_rows_float32(const float* input, float* out, int rows, int cols, int log_output);
+void* gorgonia_mps_softmax_rows_float32_buffers(void* input, int rows, int cols, int log_output);
 
 #ifdef __cplusplus
 }
