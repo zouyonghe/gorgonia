@@ -85,14 +85,14 @@ func (op mpsNLLLossOp) DoDiff(ctx ExecutionContext, inputs Nodes, output *Node) 
 }
 
 func (op mpsNLLLossOp) Do(inputs ...Value) (Value, error) {
-	return op.compute(inputs...)
+	return op.compute(nil, inputs...)
 }
 
 func (op mpsNLLLossOp) MPSDo(extern External, dev Device, prealloc Value, inputs ...Value) (Value, error) {
-	return op.compute(inputs...)
+	return op.compute(extern, inputs...)
 }
 
-func (op mpsNLLLossOp) compute(inputs ...Value) (Value, error) {
+func (op mpsNLLLossOp) compute(extern External, inputs ...Value) (Value, error) {
 	if err := checkArity(op, len(inputs)); err != nil {
 		return nil, err
 	}
@@ -121,7 +121,19 @@ func (op mpsNLLLossOp) compute(inputs ...Value) (Value, error) {
 	if !ok {
 		return nil, errors.Errorf("MPSNLLLoss expected []int32 backing, got %T", labels.Data())
 	}
-	loss, err := mpsbridge.NLLLossFloat32(logProbData, labelData, logProbs.Shape()[0], logProbs.Shape()[1])
+	rows, cols := logProbs.Shape()[0], logProbs.Shape()[1]
+	metadata := mpsMetadataFromExternal(extern)
+	var loss float32
+	var err error
+	if metadata != nil {
+		logProbValue, err := metadata.CacheFloat32Value(logProbs)
+		if err != nil {
+			return nil, err
+		}
+		loss, err = mpsbridge.NLLLossFloat32Buffer(mpsFloat32ValueBuffer(logProbValue), labelData, rows, cols)
+	} else {
+		loss, err = mpsbridge.NLLLossFloat32(logProbData, labelData, rows, cols)
+	}
 	if err != nil {
 		return nil, err
 	}

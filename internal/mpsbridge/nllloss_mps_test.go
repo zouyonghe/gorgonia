@@ -29,3 +29,23 @@ func TestNLLLossFloat32RejectsBadShapes(t *testing.T) {
 		t.Fatal("expected bad label length error")
 	}
 }
+
+func TestNLLLossFloat32Buffer(t *testing.T) {
+	if !Available() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+
+	logProbs, err := NewFloat32Buffer([]float32{
+		-2.407606, -1.407606, -0.407606,
+		-1.098612, -1.098612, -1.098612,
+	})
+	if err != nil {
+		t.Fatalf("NewFloat32Buffer() error = %v", err)
+	}
+	defer logProbs.Close()
+	got, err := NLLLossFloat32Buffer(logProbs, []int32{2, 0}, 2, 3)
+	if err != nil {
+		t.Fatalf("NLLLossFloat32Buffer() error = %v", err)
+	}
+	assertFloat32sClose(t, []float32{got}, []float32{0.753109}, 1e-5)
+}

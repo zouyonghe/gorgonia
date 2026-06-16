@@ -26,3 +26,22 @@ func NLLLossFloat32(logProbs []float32, labels []int32, rows, cols int) (float32
 	}
 	return sum / float32(rows), nil
 }
+
+// NLLLossFloat32Buffer computes mean negative log likelihood from a cached float32 MTLBuffer.
+// Labels are still consumed from host memory; this is an incremental residency step.
+func NLLLossFloat32Buffer(logProbs *Float32Buffer, labels []int32, rows, cols int) (float32, error) {
+	if rows <= 0 || cols <= 0 {
+		return 0, fmt.Errorf("invalid NLL loss shape: rows=%d cols=%d", rows, cols)
+	}
+	if logProbs == nil || logProbs.ptr == nil {
+		return 0, fmt.Errorf("NLL loss log-prob MPS buffer is closed")
+	}
+	if logProbs.count != rows*cols {
+		return 0, fmt.Errorf("NLL loss log-prob buffer length %d does not match shape (%d, %d)", logProbs.count, rows, cols)
+	}
+	data, err := logProbs.Float32s()
+	if err != nil {
+		return 0, err
+	}
+	return NLLLossFloat32(data, labels, rows, cols)
+}

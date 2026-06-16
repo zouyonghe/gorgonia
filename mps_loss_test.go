@@ -85,3 +85,30 @@ func TestMPSCrossEntropyThroughTapeMachine(t *testing.T) {
 		t.Fatalf("loss = %v, want %v", value.any(), 0.753109)
 	}
 }
+
+func TestMPSNLLLossCachesLogProbBuffer(t *testing.T) {
+	var metadata ExternMetadata
+	if !metadata.MPSAvailable() {
+		t.Skip("MPSGraph runtime is not available on this machine")
+	}
+	if err := metadata.init(); err != nil {
+		t.Fatalf("metadata.init() error = %v", err)
+	}
+	defer metadata.cleanup()
+
+	logProbs := tensor.New(tensor.WithShape(2, 3), tensor.WithBacking([]float32{
+		-2.407606, -1.407606, -0.407606,
+		-1.098612, -1.098612, -1.098612,
+	}))
+	labels := tensor.New(tensor.WithShape(2), tensor.WithBacking([]int32{2, 0}))
+	loss, err := (mpsNLLLossOp{logProbShape: logProbs.Shape()}).MPSDo(&metadata, AppleGPU(0), nil, logProbs, labels)
+	if err != nil {
+		t.Fatalf("MPSDo() error = %v", err)
+	}
+	if loss == nil {
+		t.Fatalf("MPSDo() returned nil loss")
+	}
+	if got := metadata.MPSValueCount(); got != 1 {
+		t.Fatalf("MPSValueCount() = %d, want 1", got)
+	}
+}
